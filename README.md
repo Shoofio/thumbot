@@ -2,6 +2,8 @@
 
 A Discord bot that automatically downloads and re-uploads videos from social media links, bypassing platform embeds that don't play natively in Discord.
 
+Uses [Cobalt](https://github.com/imputnet/cobalt) under the hood for video extraction.
+
 ## Features
 
 - **Automatic Detection** - Monitors messages for supported video links
@@ -34,8 +36,18 @@ Providers are configured in `providers.yaml`.
 4. Enable **Message Content Intent** under Privileged Gateway Intents
 5. Go to **OAuth2** → **URL Generator**:
    - Scopes: `bot`
-   - Permissions: `Send Messages`, `Attach Files`, `Read Message History`
+   - Bot Permissions: see below
 6. Invite the bot to your server using the generated URL
+
+#### Required Bot Permissions
+
+| Permission | Purpose |
+|------------|---------|
+| Send Messages | Post videos and embeds |
+| Attach Files | Upload downloaded videos |
+| Read Message History | Access messages with links |
+| Manage Messages | Delete original user messages |
+| Embed Links | Rich embed support |
 
 ### 2. Deploy with Docker Compose
 
@@ -83,8 +95,6 @@ docker compose logs -f thumbot
 
 ## Deployment
 
-### Docker Compose (Recommended for Single Server)
-
 ```yaml
 services:
   cobalt:
@@ -97,7 +107,7 @@ services:
       - thumbot-network
 
   thumbot:
-    image: shoofio/thumbot-mono:1.0.0
+    image: shoofio/thumbot-mono:1.2.0
     restart: unless-stopped
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
@@ -113,86 +123,6 @@ services:
 networks:
   thumbot-network:
     driver: bridge
-```
-
-### Kubernetes
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: thumbot
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: thumbot
-  template:
-    metadata:
-      labels:
-        app: thumbot
-    spec:
-      containers:
-        - name: thumbot
-          image: shoofio/thumbot-mono:1.0.0
-          env:
-            - name: DISCORD_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: thumbot-secrets
-                  key: discord-token
-            - name: COBALT_URL
-              value: "http://cobalt:9000"
-            - name: MAX_FILE_SIZE_MB
-              value: "8"
-          volumeMounts:
-            - name: temp
-              mountPath: /app/temp_videos
-      volumes:
-        - name: temp
-          emptyDir: {}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cobalt
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cobalt
-  template:
-    metadata:
-      labels:
-        app: cobalt
-    spec:
-      containers:
-        - name: cobalt
-          image: ghcr.io/imputnet/cobalt:10
-          env:
-            - name: API_PORT
-              value: "9000"
-            - name: DURATION_LIMIT
-              value: "10800"
-          ports:
-            - containerPort: 9000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: cobalt
-spec:
-  selector:
-    app: cobalt
-  ports:
-    - port: 9000
-      targetPort: 9000
-```
-
-Create the secret:
-```bash
-kubectl create secret generic thumbot-secrets \
-  --from-literal=discord-token=YOUR_TOKEN_HERE
 ```
 
 ## Local Development
