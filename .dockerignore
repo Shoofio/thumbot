@@ -1,0 +1,10 @@
+.env
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+temp_videos/
+*.md
+

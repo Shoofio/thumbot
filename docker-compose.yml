@@ -1,0 +1,59 @@
+services:
+  # Cobalt server for video downloading
+  cobalt:
+    image: ghcr.io/imputnet/cobalt:10
+    container_name: thumbbot-cobalt
+    restart: unless-stopped
+    environment:
+      - API_PORT=9000
+      - API_URL=http://thumbbot-cobalt:9000
+      - API_NAME=ThumbBot Cobalt
+      - CORS_WILDCARD=1
+      - DURATION_LIMIT=10800
+      - FILE_SIZE_LIMIT=128
+    networks:
+      - thumbot-network
+
+  # Jaeger for local tracing (comment out for production)
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: thumbbot-jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    networks:
+      - thumbot-network
+    profiles:
+      - tracing  # Only start with: docker compose --profile tracing up
+
+  # ThumbBot Discord Bot
+  thumbot:
+    build: .
+    container_name: thumbot
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - COBALT_URL=http://cobalt:9000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PICKER_BEHAVIOR=${PICKER_BEHAVIOR:-all}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-8}
+      - METRICS_PORT=8002
+      # Tracing - set OTEL_ENDPOINT to enable (e.g., http://jaeger:4317 for local)
+      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-}
+      - OTEL_ENABLED=${OTEL_ENABLED:-true}
+    volumes:
+      - ./temp_videos:/app/temp_videos
+    ports:
+      - "8002:8002"  # Metrics
+    networks:
+      - thumbot-network
+    depends_on:
+      - cobalt
+
+networks:
+  thumbot-network:
+    driver: bridge

@@ -1,0 +1,16 @@
+# ThumbBot Supported Providers
+# Add URL patterns that should trigger video downloads
+# These are matched as substrings in message URLs
+
+providers:
+  - reddit
+  - instagram.com/reel
+  - instagram.com/p
+  - facebook.com/watch
+  - facebook.com/reel
+  - facebook.com/share/v
+  - facebook.com/share/r
+  - fb.watch
+  - twitter.com
+  - x.com
+
