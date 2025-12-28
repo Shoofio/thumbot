@@ -45,6 +45,9 @@ services:
       # Tracing - set OTEL_ENDPOINT to enable (e.g., http://jaeger:4317 for local)
       - OTEL_ENDPOINT=${OTEL_ENDPOINT:-}
       - OTEL_ENABLED=${OTEL_ENABLED:-true}
+      # Webhook impersonation - sends as user instead of bot (requires Manage Webhooks)
+      - WEBHOOK_IMPERSONATION=${WEBHOOK_IMPERSONATION:-false}
+      - WEBHOOK_SUFFIX=${WEBHOOK_SUFFIX:- (ThumbBot)}
     volumes:
       - ./temp_videos:/app/temp_videos
     ports:

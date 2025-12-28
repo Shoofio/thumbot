@@ -10,6 +10,7 @@ import discord
 
 from thumbot.config import Config, load_providers
 from thumbot.downloader import VideoDownloader
+from thumbot.downloader.upload import AuthorContext
 from thumbot.bot.embed import create_video_embed
 from thumbot.utils.logger import get_logger
 from thumbot.utils.metrics import track_message, track_link_detection
@@ -17,22 +18,25 @@ from thumbot.utils.metrics import track_message, track_link_detection
 logger = get_logger("handlers")
 
 # URL regex patterns
-URL_PATTERN = re.compile(r'(https?://[^\s\)]+)', re.IGNORECASE)
+URL_PATTERN = re.compile(r'(https?://[^\s\)>]+)', re.IGNORECASE)
 # Markdown link pattern: [name](url)
 MARKDOWN_LINK_PATTERN = re.compile(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)', re.IGNORECASE)
+# Pattern to find URLs not already wrapped in <>
+UNWRAPPED_URL_PATTERN = re.compile(r'(?<![<\(])(https?://[^\s\)>]+)(?![>\)])', re.IGNORECASE)
 
 
 @dataclass
 class DownloadTask:
     """Represents a download task in the queue"""
     url: str
-    channel_id: str
+    channel: discord.abc.Messageable  # Channel object for uploads
     provider: str
-    # User context for embed
+    # User context for embed and webhook
     username: str
     avatar_url: str
     user_id: str
     user_text: Optional[str] = None  # Text with 🔗 link already formatted in position
+    original_content: Optional[str] = None  # Original message content (for webhook mode)
     original_message: Optional[discord.Message] = None  # For deletion after success
 
 
@@ -103,19 +107,37 @@ class MessageHandler:
                 logger.debug(f"Worker {worker_id} processing: {task.url}")
                 
                 try:
-                    # Create embed for this task
-                    embed = create_video_embed(
+                    # Create author context for webhook impersonation
+                    author = AuthorContext(
                         username=task.username,
                         avatar_url=task.avatar_url,
-                        original_url=task.url,
-                        user_id=task.user_id,
-                        user_text=task.user_text
+                        suffix=self.config.webhook_suffix,
                     )
+                    
+                    # In webhook mode: no embed, just original message content
+                    # In normal mode: rich embed with formatted text
+                    if self.config.webhook_impersonation:
+                        embed = None
+                        content = task.original_content or ""
+                        # Suppress Discord's auto-embeds by wrapping URLs in <>
+                        if self.config.suppress_link_embeds:
+                            content = self._suppress_url_embeds(content)
+                    else:
+                        embed = create_video_embed(
+                            username=task.username,
+                            avatar_url=task.avatar_url,
+                            original_url=task.url,
+                            user_id=task.user_id,
+                            user_text=task.user_text
+                        )
+                        content = ""
                     
                     success = await self.downloader.process_url(
                         url=task.url,
-                        channel_id=task.channel_id,
-                        embed=embed
+                        channel=task.channel,
+                        embed=embed,
+                        author=author,
+                        content=content,
                     )
                     
                     if success:
@@ -127,7 +149,7 @@ class MessageHandler:
                                 await task.original_message.delete()
                                 logger.debug(f"Deleted original message from {task.username}")
                             except discord.Forbidden:
-                                logger.warning(f"No permission to delete message in channel {task.channel_id}")
+                                logger.warning(f"No permission to delete message in channel {task.channel.id}")
                             except discord.NotFound:
                                 logger.debug("Original message already deleted")
                             except Exception as e:
@@ -185,12 +207,13 @@ class MessageHandler:
         # Add task to queue (non-blocking)
         task = DownloadTask(
             url=url,
-            channel_id=str(message.channel.id),
+            channel=message.channel,  # Pass channel object for webhook support
             provider=provider,
             username=message.author.display_name,
             avatar_url=str(message.author.display_avatar.url),
             user_id=str(message.author.id),
             user_text=user_text,
+            original_content=message.content,  # Keep original for webhook mode
             original_message=message  # Keep reference for deletion after success
         )
         await self._task_queue.put(task)
@@ -255,6 +278,11 @@ class MessageHandler:
             return domain, False
         except Exception:
             return "unknown", False
+    
+    def _suppress_url_embeds(self, content: str) -> str:
+        """Wrap URLs in <> to prevent Discord from auto-embedding them"""
+        # Replace URLs not already in <> or markdown ()
+        return UNWRAPPED_URL_PATTERN.sub(r'<\1>', content)
     
     @property
     def queue_size(self) -> int:

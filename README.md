@@ -10,6 +10,7 @@ Uses [Cobalt](https://github.com/imputnet/cobalt) under the hood for video extra
 - **Quality Fallback** - Starts at max quality, steps down if file exceeds Discord's limit
 - **FFmpeg Compression** - Last-resort compression when all quality levels are too large
 - **Rich Embeds** - Shows who posted, original link, and any accompanying text
+- **Webhook Impersonation** - Optional mode that posts as the original user via webhooks
 - **Async Processing** - Concurrent downloads with configurable worker pool
 - **Silent Operation** - No user-facing errors, failures go to logs only
 - **Prometheus Metrics** - Track downloads, uploads, and Cobalt API performance
@@ -48,6 +49,7 @@ Providers are configured in `providers.yaml`.
 | Read Message History | Access messages with links |
 | Manage Messages | Delete original user messages |
 | Embed Links | Rich embed support |
+| Manage Webhooks | *Optional* - Required for webhook impersonation mode |
 
 ### 2. Deploy with Docker Compose
 
@@ -92,6 +94,29 @@ docker compose logs -f thumbot
 | `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `OTEL_ENDPOINT` | *empty* | OpenTelemetry collector (e.g., `http://jaeger:4317`) |
 | `OTEL_ENABLED` | `true` | Enable tracing (requires `OTEL_ENDPOINT`) |
+| `WEBHOOK_IMPERSONATION` | `false` | Send as user via webhook (requires Manage Webhooks permission) |
+| `WEBHOOK_SUFFIX` | ` (ThumbBot)` | Suffix appended to username when using webhooks |
+| `SUPPRESS_LINK_EMBEDS` | `true` | Wrap URLs in `<>` to prevent Discord auto-embeds (webhook mode only) |
+
+## Webhook Impersonation Mode
+
+When `WEBHOOK_IMPERSONATION=true`, the bot sends messages via Discord webhooks, making them appear as if they came from the original user (with a suffix like `(ThumbBot)`).
+
+**Behavior differences:**
+- No rich embed - sends the original message exactly as typed
+- User's avatar and name displayed
+- URLs wrapped in `<>` to suppress Discord's link previews
+- Falls back to normal bot mode in threads (webhooks don't work there)
+
+**Example:**
+```
+# User posts:
+check this out https://reddit.com/r/funny/comments/abc123
+
+# Bot deletes original, reposts as "Username (ThumbBot)":
+check this out <https://reddit.com/r/funny/comments/abc123>
+[video attachment]
+```
 
 ## Deployment
 

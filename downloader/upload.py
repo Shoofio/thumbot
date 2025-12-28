@@ -1,19 +1,37 @@
 """
 Discord file upload functionality (async)
+Supports both direct API uploads and webhook-based impersonation
 """
 import os
 import json
 import aiohttp
 import aiofiles
+from dataclasses import dataclass
 from typing import Optional, Any
+
+import discord
 
 from thumbot.utils.logger import get_logger
 from thumbot.utils.metrics import track_discord_upload
+from thumbot.utils.webhook import get_or_create_webhook, send_via_webhook
 from thumbot.downloader.exceptions import UploadError
 
 logger = get_logger("upload")
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
+
+
+@dataclass
+class AuthorContext:
+    """Author information for webhook impersonation"""
+    username: str
+    avatar_url: str
+    suffix: str = " (ThumbBot)"
+    
+    @property
+    def display_name(self) -> str:
+        """Username with suffix for webhook display"""
+        return f"{self.username}{self.suffix}"
 
 
 def embed_to_dict(embed: Any) -> Optional[dict]:
@@ -179,3 +197,95 @@ async def upload_multiple_to_discord(
         logger.error(f"Unexpected error uploading files: {e}")
         track_discord_upload("error")
         raise UploadError(f"Discord multi-upload failed: {e}")
+
+
+async def upload_via_webhook(
+    channel: discord.abc.GuildChannel,
+    file_paths: list[str],
+    author: AuthorContext,
+    embed: Any = None,
+    content: str = "",
+) -> Optional[discord.Message]:
+    """
+    Upload files via webhook, impersonating the original author.
+    Falls back to regular channel.send() if webhooks unavailable.
+    
+    Args:
+        channel: Discord channel object
+        file_paths: List of file paths to upload
+        author: Author context for impersonation
+        embed: Optional discord.Embed
+        content: Optional message content
+    
+    Returns:
+        The sent message, or None on failure
+    """
+    if not file_paths:
+        return None
+    
+    # Limit to 10 files per Discord's limit
+    if len(file_paths) > 10:
+        logger.warning(f"Discord limit: Uploading 10/{len(file_paths)} files")
+        file_paths = file_paths[:10]
+    
+    # Create discord.File objects
+    files = []
+    for path in file_paths:
+        try:
+            files.append(discord.File(path))
+        except Exception as e:
+            logger.error(f"Failed to create File from {path}: {e}")
+    
+    if not files:
+        track_discord_upload("error")
+        raise UploadError("No valid files to upload")
+    
+    try:
+        # Try webhook first
+        webhook = await get_or_create_webhook(channel)
+        
+        if webhook:
+            logger.debug(f"Uploading via webhook as '{author.display_name}'")
+            message = await send_via_webhook(
+                webhook=webhook,
+                username=author.display_name,
+                avatar_url=author.avatar_url,
+                files=files,
+                embed=embed,
+                content=content,
+            )
+            
+            if message:
+                track_discord_upload("success")
+                logger.info(f"Uploaded {len(file_paths)} file(s) via webhook")
+                return message
+            else:
+                logger.warning("Webhook send failed, falling back to regular send")
+        
+        # Fallback: regular channel.send (for threads or permission issues)
+        logger.debug("Using fallback channel.send()")
+        
+        # Need to recreate files since they were consumed
+        files = [discord.File(path) for path in file_paths]
+        
+        message = await channel.send(
+            content=content,
+            files=files,
+            embed=embed,
+        )
+        track_discord_upload("success")
+        logger.info(f"Uploaded {len(file_paths)} file(s) via channel.send()")
+        return message
+        
+    except discord.Forbidden as e:
+        logger.error(f"No permission to send in channel: {e}")
+        track_discord_upload("error")
+        raise UploadError(f"No permission to send: {e}")
+    except discord.HTTPException as e:
+        logger.error(f"Discord HTTP error: {e}")
+        track_discord_upload("error")
+        raise UploadError(f"Discord error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error uploading: {e}")
+        track_discord_upload("error")
+        raise UploadError(f"Upload failed: {e}")

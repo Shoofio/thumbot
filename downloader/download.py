@@ -7,12 +7,19 @@ import aiofiles
 from urllib.parse import urlparse
 from typing import Optional
 
+import discord
+
 from thumbot.config import Config, PickerBehavior, VideoQuality
 from thumbot.utils.logger import get_logger
 from thumbot.utils.metrics import MetricsContext
 from thumbot.utils.tracing import trace_span, add_span_attributes, add_span_event
 from thumbot.downloader.cobalt import CobaltClient
-from thumbot.downloader.upload import upload_to_discord, upload_multiple_to_discord
+from thumbot.downloader.upload import (
+    upload_to_discord, 
+    upload_multiple_to_discord,
+    upload_via_webhook,
+    AuthorContext,
+)
 from thumbot.downloader.compress import compress_video
 from thumbot.downloader.exceptions import FileTooLargeError, CobaltError, DownloadError
 
@@ -46,19 +53,29 @@ class VideoDownloader:
         if self._http_session and not self._http_session.closed:
             await self._http_session.close()
     
-    async def process_url(self, url: str, channel_id: str, embed=None) -> bool:
+    async def process_url(
+        self, 
+        url: str, 
+        channel: discord.abc.Messageable,
+        embed: Optional[discord.Embed] = None,
+        author: Optional[AuthorContext] = None,
+        content: str = "",
+    ) -> bool:
         """
         Process a video URL - download via Cobalt and upload to Discord
         
         Args:
             url: Video URL to process
-            channel_id: Discord channel ID to upload to
+            channel: Discord channel to upload to
             embed: Optional discord.Embed to include with the upload
+            author: Optional author context for webhook impersonation
+            content: Optional message content (used in webhook mode)
         
         Returns:
             True if successful, False otherwise
         """
         file_paths = []
+        channel_id = str(channel.id)
         
         async with trace_span("process_url", {"url": url, "channel_id": channel_id}) as span:
             try:
@@ -79,7 +96,7 @@ class VideoDownloader:
                 
                 # Upload to Discord
                 if file_paths:
-                    await self._upload_files(channel_id, file_paths, embed)
+                    await self._upload_files(channel, file_paths, embed, author, content)
                     logger.success(f"Uploaded {len(file_paths)} file(s) to Discord")
                     span.add_event("upload_complete", {"files": len(file_paths)})
                 
@@ -401,23 +418,42 @@ class VideoDownloader:
                     os.remove(file_path)
                 raise DownloadError(f"Failed to download {video_url}: {e}")
     
-    async def _upload_files(self, channel_id: str, file_paths: list[str], embed=None):
-        """Upload files to Discord with embed"""
+    async def _upload_files(
+        self, 
+        channel: discord.abc.Messageable, 
+        file_paths: list[str], 
+        embed: Optional[discord.Embed] = None,
+        author: Optional[AuthorContext] = None,
+        content: str = "",
+    ):
+        """Upload files to Discord with embed, using webhook if enabled"""
+        channel_id = str(channel.id)
         async with trace_span("discord_upload", {"channel_id": channel_id, "file_count": len(file_paths)}):
-            if len(file_paths) == 1:
-                await upload_to_discord(
-                    channel_id, 
-                    file_paths[0], 
-                    self.config.discord_token,
-                    embed=embed
+            # Use webhook impersonation if enabled and author provided
+            if self.config.webhook_impersonation and author and isinstance(channel, discord.abc.GuildChannel):
+                await upload_via_webhook(
+                    channel=channel,
+                    file_paths=file_paths,
+                    author=author,
+                    embed=embed,
+                    content=content,
                 )
             else:
-                await upload_multiple_to_discord(
-                    channel_id, 
-                    file_paths, 
-                    self.config.discord_token,
-                    embed=embed
-                )
+                # Fallback to REST API upload
+                if len(file_paths) == 1:
+                    await upload_to_discord(
+                        channel_id, 
+                        file_paths[0], 
+                        self.config.discord_token,
+                        embed=embed
+                    )
+                else:
+                    await upload_multiple_to_discord(
+                        channel_id, 
+                        file_paths, 
+                        self.config.discord_token,
+                        embed=embed
+                    )
     
     async def _cleanup_files(self, file_paths: list[str]):
         """Remove downloaded files"""

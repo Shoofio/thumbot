@@ -68,6 +68,11 @@ class Config:
     otel_endpoint: str = ""  # e.g., "http://jaeger:4317" - empty = disabled
     otel_enabled: bool = True
     
+    # Webhook impersonation
+    webhook_impersonation: bool = False  # Send as user via webhook (requires Manage Webhooks)
+    webhook_suffix: str = " (ThumbBot)"  # Appended to username when using webhooks
+    suppress_link_embeds: bool = True  # Wrap URLs in <> to prevent Discord auto-embeds
+    
     # Providers file path
     providers_file: str = "providers.yaml"
     
@@ -108,6 +113,9 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             otel_endpoint=os.getenv("OTEL_ENDPOINT", ""),
             otel_enabled=os.getenv("OTEL_ENABLED", "true").lower() == "true",
+            webhook_impersonation=os.getenv("WEBHOOK_IMPERSONATION", "false").lower() == "true",
+            webhook_suffix=os.getenv("WEBHOOK_SUFFIX", " (ThumbBot)"),
+            suppress_link_embeds=os.getenv("SUPPRESS_LINK_EMBEDS", "true").lower() == "true",
             providers_file=os.getenv("PROVIDERS_FILE", "providers.yaml"),
         )
 
