@@ -8,7 +8,9 @@ Requires env vars:
 """
 
 import os
+import json
 import asyncio
+import urllib.request
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
@@ -42,7 +44,6 @@ class DiscordE2EClient:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={"Authorization": f"Bot {self.bot_token}"},
-                timeout=aiohttp.ClientTimeout(total=30),
             )
         return self._session
 
@@ -108,7 +109,7 @@ def _require_env(name: str) -> str:
     return val
 
 
-def _run_header() -> str:
+def _run_info() -> str:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     sha = os.environ.get("GITHUB_SHA", "local")[:7]
     pr = os.environ.get("GITHUB_PR_NUMBER", os.environ.get("GITHUB_REF", "manual"))
@@ -116,27 +117,48 @@ def _run_header() -> str:
     return f"PR: {pr} | SHA: {sha} | Run: {run_id} | {ts}"
 
 
-@pytest_asyncio.fixture(scope="session")
-async def _e2e_client():
+def _send_webhook_sync(webhook_url: str, content: str):
+    """Send a webhook message synchronously (for session hooks)."""
+    data = json.dumps({"content": content}).encode()
+    req = urllib.request.Request(
+        webhook_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req)
+    except Exception:
+        pass
+
+
+def pytest_sessionstart(session):
+    webhook_url = os.environ.get("DISCORD_E2E_WEBHOOK_URL")
+    if webhook_url:
+        info = _run_info()
+        _send_webhook_sync(
+            webhook_url,
+            f"```\n{'=' * 60}\n  TEST START  {info}\n{'=' * 60}\n```",
+        )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    webhook_url = os.environ.get("DISCORD_E2E_WEBHOOK_URL")
+    if webhook_url:
+        info = _run_info()
+        status = "PASSED" if exitstatus == 0 else "FAILED"
+        _send_webhook_sync(
+            webhook_url,
+            f"```\n{'=' * 60}\n  TEST END [{status}]  {info}\n{'=' * 60}\n```",
+        )
+
+
+@pytest_asyncio.fixture
+async def discord():
     client = DiscordE2EClient(
         bot_token=_require_env("DISCORD_E2E_BOT_TOKEN"),
         webhook_url=_require_env("DISCORD_E2E_WEBHOOK_URL"),
         channel_id=_require_env("DISCORD_E2E_CHANNEL_ID"),
     )
-
-    header = _run_header()
-    await client.send_webhook_message(
-        f"```\n{'=' * 60}\n  TEST START  {header}\n{'=' * 60}\n```"
-    )
-
     yield client
-
-    await client.send_webhook_message(
-        f"```\n{'=' * 60}\n  TEST END    {header}\n{'=' * 60}\n```"
-    )
     await client.close()
-
-
-@pytest_asyncio.fixture
-async def discord(_e2e_client):
-    yield _e2e_client
