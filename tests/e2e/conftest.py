@@ -10,7 +10,7 @@ Requires env vars:
 import os
 import json
 import asyncio
-import urllib.request
+import subprocess
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
@@ -119,15 +119,14 @@ def _run_info() -> str:
 
 def _send_webhook_sync(webhook_url: str, content: str):
     """Send a webhook message synchronously (for session hooks)."""
-    data = json.dumps({"content": content}).encode()
-    req = urllib.request.Request(
-        webhook_url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
     try:
-        urllib.request.urlopen(req)
+        subprocess.run(
+            ["curl", "-s", "-X", "POST", webhook_url,
+             "-H", "Content-Type: application/json",
+             "-d", json.dumps({"content": content})],
+            timeout=10,
+            capture_output=True,
+        )
     except Exception:
         pass
 
