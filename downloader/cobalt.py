@@ -67,20 +67,19 @@ class CobaltClient:
             async with session.post(self.base_url, json=payload) as response:
                 response_time = time.time() - start_time
                 
-                # 400 means quality not available - expected during fallback
                 if response.status == 400:
+                    body = await response.json()
+                    error_code = body.get("error", {}).get("code", "unknown") if isinstance(body.get("error"), dict) else body.get("error", "unknown")
                     track_cobalt_request("quality_unavailable", response_time)
-                    raise CobaltError(f"Quality not available: {quality.value if quality else 'max'}")
+                    raise CobaltError(f"{error_code}")
                 
                 response.raise_for_status()
                 result = await response.json()
                 
-                # Handle error responses
                 if result.get("status") == "error":
-                    error_code = result.get("error", {}).get("code", "unknown")
-                    error_text = result.get("text", "Unknown error")
+                    error_code = result.get("error", {}).get("code", "unknown") if isinstance(result.get("error"), dict) else result.get("error", "unknown")
                     track_cobalt_request("error", response_time)
-                    raise CobaltError(f"Cobalt error ({error_code}): {error_text}")
+                    raise CobaltError(f"{error_code}")
                 
                 track_cobalt_request("success", response_time)
                 quality_str = quality.value if quality else "max"
