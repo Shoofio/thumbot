@@ -11,10 +11,10 @@ import pytest
 # These must be short/small enough to stay under the file-size limit so the
 # bot can actually download and upload them.
 
-TWITTER_VIDEO = "https://x.com/ThePracticalDev/status/1753556798668492807"
-REDDIT_VIDEO = "https://www.reddit.com/r/aww/comments/1atdl6a/"
-REDDIT_NEEDS_COMPRESSION = "https://www.reddit.com/r/leagueoflegends/comments/r1x8lm/shadowbox_of_malphite_altered_the_original_art/"
+TWITTER_VIDEO = "https://x.com/Osinttechnical/status/2028899082412908623"
+INSTAGRAM_REEL = "https://www.instagram.com/reel/DVUVjI6EUDb/?igsh=YWc5NGtoaTZtcTZu"
 INSTAGRAM_MULTI_IMAGE = "https://instagram.com/p/DR-vRaRjFyY"
+REDDIT_NEEDS_COMPRESSION = "https://www.reddit.com/r/leagueoflegends/comments/r1x8lm/shadowbox_of_malphite_altered_the_original_art/"
 YOUTUBE_SHORT = "https://www.youtube.com/shorts/dQw4w9WgXcQ"
 
 # Instagram URLs that should produce Cobalt errors (not "file too large")
@@ -34,7 +34,7 @@ class TestWarmup:
         This doubles as a warmup probe: if the bot isn't deployed yet, we
         retry for up to ~3 minutes.
         """
-        sent = await discord.send_webhook_message(REDDIT_VIDEO)
+        sent = await discord.send_webhook_message(TWITTER_VIDEO)
         response = await discord.wait_for_bot_response(sent["id"], timeout=180)
         assert response is not None, (
             "Bot did not respond within 180 s -- is it deployed and connected?"
@@ -65,11 +65,11 @@ class TestHappyPath:
         )
 
     @pytest.mark.timeout(120)
-    async def test_reddit_video(self, discord):
-        sent = await discord.send_webhook_message(REDDIT_VIDEO)
+    async def test_instagram_reel(self, discord):
+        sent = await discord.send_webhook_message(INSTAGRAM_REEL)
         response = await discord.wait_for_bot_response(sent["id"], timeout=90)
-        assert response is not None, "No response for Reddit link"
-        assert response.attachments, "Expected a file attachment for Reddit video"
+        assert response is not None, "No response for Instagram reel"
+        assert response.attachments, "Expected a file attachment for Instagram reel"
 
     @pytest.mark.timeout(180)
     async def test_reddit_needs_compression(self, discord):
