@@ -132,6 +132,7 @@ class VideoDownloader:
             best_download_url = None
             best_filename = None
             smallest_size = float('inf')
+            last_cobalt_error = None
             
             for quality in quality_chain:
                 try:
@@ -196,7 +197,7 @@ class VideoDownloader:
                         # If no files fit, continue to compression
                     
                 except CobaltError as e:
-                    # Some qualities might not be available for certain videos
+                    last_cobalt_error = e
                     logger.debug(f"Quality {quality.value} failed: {e}")
                     continue
             
@@ -212,11 +213,14 @@ class VideoDownloader:
                 if compressed_path:
                     span.set_attribute("compressed", True)
                     return {"type": "single", "file_path": compressed_path}
+                raise FileTooLargeError(
+                    f"File exceeds {max_size_mb:.1f}MB limit and compression failed"
+                )
             
-            # Everything failed
-            raise FileTooLargeError(
-                f"File exceeds {max_size_mb:.1f}MB limit and compression failed"
-            )
+            # No download URL was ever obtained -- Cobalt couldn't fetch the content
+            if last_cobalt_error:
+                raise last_cobalt_error
+            raise CobaltError("All quality levels failed with no usable response")
     
     async def _download_and_compress(
         self, 

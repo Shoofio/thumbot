@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-dev.txt requirements.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+ENV PYTHONPATH=/app
+ENV DISCORD_TOKEN=test-token-not-real
+
+COPY . ./thumbot/
+COPY pyproject.toml ./
+
+RUN mv ./thumbot/providers.yaml ./providers.yaml 2>/dev/null || true
+
+ENTRYPOINT ["python", "-m", "pytest"]
+CMD ["-v"]

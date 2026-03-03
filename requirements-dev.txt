@@ -1,0 +1,6 @@
+# Test dependencies (install alongside requirements.txt)
+-r requirements.txt
+
+pytest
+pytest-asyncio
+aioresponses
