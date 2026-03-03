@@ -9,6 +9,7 @@ Requires env vars:
 
 import os
 import asyncio
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 import aiohttp
@@ -36,7 +37,6 @@ class DiscordE2EClient:
         self.webhook_url = webhook_url
         self.channel_id = channel_id
         self._session: aiohttp.ClientSession | None = None
-        self._messages_to_cleanup: list[str] = []
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -52,9 +52,7 @@ class DiscordE2EClient:
         url = f"{self.webhook_url}?wait=true" if wait else self.webhook_url
         async with session.post(url, json={"content": content}) as resp:
             resp.raise_for_status()
-            data = await resp.json()
-            self._messages_to_cleanup.append(data["id"])
-            return data
+            return await resp.json()
 
     async def get_channel_messages(
         self, *, after: str | None = None, limit: int = 20
@@ -93,32 +91,12 @@ class DiscordE2EClient:
             messages = await self.get_channel_messages(after=after_message_id)
             bot_msgs = [m for m in messages if m.author_bot]
             if bot_msgs:
-                for m in bot_msgs:
-                    self._messages_to_cleanup.append(m.id)
                 return bot_msgs[0]
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
         return None
 
-    async def delete_message(self, message_id: str) -> None:
-        session = await self._get_session()
-        url = f"{DISCORD_API}/channels/{self.channel_id}/messages/{message_id}"
-        async with session.delete(url) as resp:
-            if resp.status not in (200, 204, 404):
-                resp.raise_for_status()
-
-    async def cleanup(self) -> None:
-        """Delete all messages created during the test run."""
-        for msg_id in self._messages_to_cleanup:
-            try:
-                await self.delete_message(msg_id)
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
-        self._messages_to_cleanup.clear()
-
     async def close(self) -> None:
-        await self.cleanup()
         if self._session and not self._session.closed:
             await self._session.close()
 
@@ -130,12 +108,35 @@ def _require_env(name: str) -> str:
     return val
 
 
-@pytest_asyncio.fixture
-async def discord() -> DiscordE2EClient:
+def _run_header() -> str:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    sha = os.environ.get("GITHUB_SHA", "local")[:7]
+    pr = os.environ.get("GITHUB_PR_NUMBER", os.environ.get("GITHUB_REF", "manual"))
+    run_id = os.environ.get("GITHUB_RUN_ID", "local")
+    return f"PR: {pr} | SHA: {sha} | Run: {run_id} | {ts}"
+
+
+@pytest_asyncio.fixture(scope="session")
+async def _e2e_client():
     client = DiscordE2EClient(
         bot_token=_require_env("DISCORD_E2E_BOT_TOKEN"),
         webhook_url=_require_env("DISCORD_E2E_WEBHOOK_URL"),
         channel_id=_require_env("DISCORD_E2E_CHANNEL_ID"),
     )
+
+    header = _run_header()
+    await client.send_webhook_message(
+        f"```\n{'=' * 60}\n  TEST START  {header}\n{'=' * 60}\n```"
+    )
+
     yield client
+
+    await client.send_webhook_message(
+        f"```\n{'=' * 60}\n  TEST END    {header}\n{'=' * 60}\n```"
+    )
     await client.close()
+
+
+@pytest_asyncio.fixture
+async def discord(_e2e_client):
+    yield _e2e_client
