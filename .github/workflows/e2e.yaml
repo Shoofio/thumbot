@@ -122,7 +122,7 @@ jobs:
           DISCORD_E2E_BOT_TOKEN: ${{ secrets.DISCORD_E2E_BOT_TOKEN }}
           DISCORD_E2E_WEBHOOK_URL: ${{ secrets.DISCORD_E2E_WEBHOOK_URL }}
           DISCORD_E2E_CHANNEL_ID: ${{ secrets.DISCORD_E2E_CHANNEL_ID }}
-        run: pytest tests/e2e/ -v --tb=short
+        run: pytest tests/e2e/ -v --tb=short --override-ini="testpaths=tests/e2e" --rootdir=tests/e2e
 
       - name: Report results
         if: always()
