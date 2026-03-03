@@ -1,0 +1,145 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+env:
+  IMAGE_NAME: shoofio/thumbot-mono
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      pr_number: ${{ steps.meta.outputs.pr_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate metadata
+        id: meta
+        run: |
+          SHA_SHORT=$(echo ${{ github.event.pull_request.head.sha }} | cut -c1-7)
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "sha_short=${SHA_SHORT}" >> $GITHUB_OUTPUT
+          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "image_tag=pr-${PR_NUMBER}-${SHA_SHORT}" >> $GITHUB_OUTPUT
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Trigger Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Add preview label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ needs.build.outputs.pr_number }},
+              labels: ['preview']
+            });
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ needs.build.outputs.pr_number }};
+            const imageTag = '${{ needs.build.outputs.image_tag }}';
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            for (const comment of comments.data) {
+              if (comment.body.includes('Preview Deployment')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+              }
+            }
+
+            const body = [
+              '## Preview Deployment',
+              '',
+              `Image: \`${{ env.IMAGE_NAME }}:${imageTag}\``,
+              `Namespace: \`thumbot-e2e-pr-${prNumber}\``,
+              '',
+              '> ArgoCD is deploying... E2E tests will run once the bot is online.'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: body
+            });
+
+  test:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install aiohttp pytest pytest-asyncio pytest-timeout
+
+      - name: Run E2E tests
+        env:
+          DISCORD_E2E_BOT_TOKEN: ${{ secrets.DISCORD_E2E_BOT_TOKEN }}
+          DISCORD_E2E_WEBHOOK_URL: ${{ secrets.DISCORD_E2E_WEBHOOK_URL }}
+          DISCORD_E2E_CHANNEL_ID: ${{ secrets.DISCORD_E2E_CHANNEL_ID }}
+        run: pytest tests/e2e/ -v --tb=short
+
+      - name: Report results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed = '${{ job.status }}' === 'success';
+
+            const body = [
+              '## E2E Test Results',
+              '',
+              passed ? 'All tests passed.' : 'Some tests failed. Check the workflow run for details.'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ needs.build.outputs.pr_number }},
+              body: body
+            });

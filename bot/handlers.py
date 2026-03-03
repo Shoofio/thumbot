@@ -155,9 +155,9 @@ class MessageHandler:
         Args:
             message: Discord message object
         """
-        # Ignore bot messages
         if message.author.bot:
-            return
+            if not (self.config.e2e_channel_id and message.channel.id == self.config.e2e_channel_id):
+                return
         
         # Extract URL from message
         url = self._extract_url(message.content)

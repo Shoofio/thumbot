@@ -71,6 +71,9 @@ class Config:
     # Providers file path
     providers_file: str = "providers.yaml"
     
+    # E2E testing -- channel where webhook/bot messages are processed (0 = disabled)
+    e2e_channel_id: int = 0
+    
     @property
     def max_file_size_bytes(self) -> int:
         """Convert MB to bytes"""
@@ -109,6 +112,7 @@ class Config:
             otel_endpoint=os.getenv("OTEL_ENDPOINT", ""),
             otel_enabled=os.getenv("OTEL_ENABLED", "true").lower() == "true",
             providers_file=os.getenv("PROVIDERS_FILE", "providers.yaml"),
+            e2e_channel_id=int(os.getenv("E2E_CHANNEL_ID", "0")),
         )
 
 
