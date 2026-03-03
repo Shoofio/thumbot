@@ -7,7 +7,7 @@ A warmup probe runs first to confirm the bot is online.
 
 import pytest
 
-from tests.e2e.conftest import DiscordE2EClient
+from conftest import DiscordE2EClient
 
 # ── Known test URLs ──────────────────────────────────────────────────────────
 # These must be short/small enough to stay under the file-size limit so the
