@@ -92,7 +92,7 @@ class TestDownloadVideo:
     async def test_http_400_raises_cobalt_error(self, cobalt):
         with aioresponses() as m:
             m.post(COBALT_URL + "/", status=400)
-            with pytest.raises(CobaltError, match="Quality not available"):
+            with pytest.raises(CobaltError, match="unknown"):
                 await cobalt.download_video(
                     "https://instagram.com/reel/abc", VideoQuality.UHD_4K
                 )

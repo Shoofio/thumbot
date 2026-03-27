@@ -45,7 +45,24 @@ class VideoDownloader:
         await self.cobalt.close()
         if self._http_session and not self._http_session.closed:
             await self._http_session.close()
-    
+
+    async def _resolve_facebook_share_url(self, url: str) -> str:
+        """Resolve Facebook share URLs by following redirects to get the actual content URL."""
+        if "facebook.com/share/" not in url:
+            return url
+
+        try:
+            logger.debug(f"Resolving Facebook share URL: {url}")
+            session = await self._get_session()
+            async with session.get(url, allow_redirects=True) as response:
+                resolved = str(response.url)
+                if resolved != url:
+                    logger.info(f"Resolved Facebook share URL: {url} -> {resolved}")
+                return resolved
+        except Exception as e:
+            logger.warning(f"Failed to resolve Facebook share URL, using original: {e}")
+            return url
+
     async def process_url(self, url: str, channel_id: str, embed=None) -> bool:
         """
         Process a video URL - download via Cobalt and upload to Discord
@@ -63,7 +80,13 @@ class VideoDownloader:
         async with trace_span("process_url", {"url": url, "channel_id": channel_id}) as span:
             try:
                 logger.info(f"Processing video request: {url}")
-                
+
+                # Resolve Facebook share URLs to actual content URLs
+                original_url = url
+                url = await self._resolve_facebook_share_url(url)
+                if url != original_url:
+                    add_span_attributes(resolved_url=url)
+
                 # Get video with quality fallback
                 with MetricsContext("download"):
                     result = await self._download_with_quality_fallback(url)

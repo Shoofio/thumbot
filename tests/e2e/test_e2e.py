@@ -16,6 +16,7 @@ INSTAGRAM_REEL = "https://www.instagram.com/reel/DVUVjI6EUDb/?igsh=YWc5NGtoaTZtc
 INSTAGRAM_MULTI_IMAGE = "https://instagram.com/p/DR-vRaRjFyY"
 REDDIT_NEEDS_COMPRESSION = "https://www.reddit.com/r/leagueoflegends/comments/r1x8lm/shadowbox_of_malphite_altered_the_original_art/"
 YOUTUBE_SHORT = "https://www.youtube.com/shorts/dQw4w9WgXcQ"
+FACEBOOK_SHARE = "https://www.facebook.com/share/v/1FtYiBbiPb/"
 
 # Instagram URLs that should produce Cobalt errors (not "file too large")
 INSTAGRAM_UNAVAILABLE = "https://www.instagram.com/reel/DVJ6n17khYN/?igsh=MTN5azBxcWNzbXFuMg%3D%3D"
@@ -27,17 +28,25 @@ INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2N
 class TestWarmup:
     """Verify the bot is online before running real tests."""
 
-    @pytest.mark.timeout(200)
+    @pytest.mark.timeout(300)
     async def test_bot_is_online(self, discord):
         """Send a supported URL and wait for the bot to respond.
 
         This doubles as a warmup probe: if the bot isn't deployed yet, we
-        retry for up to ~3 minutes.
+        resend every 30s until we get a response or ~5 minutes elapse.
         """
-        sent = await discord.send_webhook_message(TWITTER_VIDEO)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=180)
+        import asyncio
+
+        response = None
+        for attempt in range(10):
+            sent = await discord.send_webhook_message(TWITTER_VIDEO)
+            response = await discord.wait_for_bot_response(sent["id"], timeout=30)
+            if response is not None:
+                break
+            await asyncio.sleep(2)
+
         assert response is not None, (
-            "Bot did not respond within 180 s -- is it deployed and connected?"
+            "Bot did not respond after multiple attempts -- is it deployed and connected?"
         )
         assert response.attachments or response.embeds, (
             "Bot responded but with no attachments or embeds"
@@ -70,6 +79,14 @@ class TestHappyPath:
         response = await discord.wait_for_bot_response(sent["id"], timeout=150)
         assert response is not None, "No response for Reddit link needing compression"
         assert response.attachments, "Expected a compressed file attachment"
+
+    @pytest.mark.timeout(60)
+    async def test_facebook_share_link(self, discord):
+        """A Facebook share link should be resolved and downloaded."""
+        sent = await discord.send_webhook_message(FACEBOOK_SHARE)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        assert response is not None, "No response for Facebook share link"
+        assert response.attachments, "Expected a file attachment for Facebook share video"
 
     @pytest.mark.timeout(60)
     async def test_instagram_multi_image(self, discord):

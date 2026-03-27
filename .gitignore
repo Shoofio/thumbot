@@ -15,6 +15,7 @@ temp_videos/
 .vscode/
 .idea/
 .cursor/
+.claude/
 
 # Grafana
 grafana-dashboards/
