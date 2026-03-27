@@ -68,7 +68,7 @@ class CobaltClient:
                 response_time = time.time() - start_time
                 
                 if response.status == 400:
-                    body = await response.json()
+                    body = await response.json() or {}
                     error_code = body.get("error", {}).get("code", "unknown") if isinstance(body.get("error"), dict) else body.get("error", "unknown")
                     track_cobalt_request("quality_unavailable", response_time)
                     raise CobaltError(f"{error_code}")

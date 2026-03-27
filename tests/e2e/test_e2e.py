@@ -16,6 +16,7 @@ INSTAGRAM_REEL = "https://www.instagram.com/reel/DVUVjI6EUDb/?igsh=YWc5NGtoaTZtc
 INSTAGRAM_MULTI_IMAGE = "https://instagram.com/p/DR-vRaRjFyY"
 REDDIT_NEEDS_COMPRESSION = "https://www.reddit.com/r/leagueoflegends/comments/r1x8lm/shadowbox_of_malphite_altered_the_original_art/"
 YOUTUBE_SHORT = "https://www.youtube.com/shorts/dQw4w9WgXcQ"
+FACEBOOK_SHARE = "https://www.facebook.com/share/v/1FtYiBbiPb/"
 
 # Instagram URLs that should produce Cobalt errors (not "file too large")
 INSTAGRAM_UNAVAILABLE = "https://www.instagram.com/reel/DVJ6n17khYN/?igsh=MTN5azBxcWNzbXFuMg%3D%3D"
@@ -70,6 +71,14 @@ class TestHappyPath:
         response = await discord.wait_for_bot_response(sent["id"], timeout=150)
         assert response is not None, "No response for Reddit link needing compression"
         assert response.attachments, "Expected a compressed file attachment"
+
+    @pytest.mark.timeout(60)
+    async def test_facebook_share_link(self, discord):
+        """A Facebook share link should be resolved and downloaded."""
+        sent = await discord.send_webhook_message(FACEBOOK_SHARE)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        assert response is not None, "No response for Facebook share link"
+        assert response.attachments, "Expected a file attachment for Facebook share video"
 
     @pytest.mark.timeout(60)
     async def test_instagram_multi_image(self, discord):
