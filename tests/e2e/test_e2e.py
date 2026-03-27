@@ -28,17 +28,25 @@ INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2N
 class TestWarmup:
     """Verify the bot is online before running real tests."""
 
-    @pytest.mark.timeout(200)
+    @pytest.mark.timeout(300)
     async def test_bot_is_online(self, discord):
         """Send a supported URL and wait for the bot to respond.
 
         This doubles as a warmup probe: if the bot isn't deployed yet, we
-        retry for up to ~3 minutes.
+        resend every 30s until we get a response or ~5 minutes elapse.
         """
-        sent = await discord.send_webhook_message(TWITTER_VIDEO)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=180)
+        import asyncio
+
+        response = None
+        for attempt in range(10):
+            sent = await discord.send_webhook_message(TWITTER_VIDEO)
+            response = await discord.wait_for_bot_response(sent["id"], timeout=30)
+            if response is not None:
+                break
+            await asyncio.sleep(2)
+
         assert response is not None, (
-            "Bot did not respond within 180 s -- is it deployed and connected?"
+            "Bot did not respond after multiple attempts -- is it deployed and connected?"
         )
         assert response.attachments or response.embeds, (
             "Bot responded but with no attachments or embeds"
