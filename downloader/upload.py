@@ -15,6 +15,14 @@ logger = get_logger("upload")
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
+# Discord blurs any attachment whose filename starts with this prefix.
+SPOILER_PREFIX = "SPOILER_"
+
+
+def _spoiler_filename(name: str) -> str:
+    """Idempotently apply the SPOILER_ prefix Discord recognizes."""
+    return name if name.startswith(SPOILER_PREFIX) else SPOILER_PREFIX + name
+
 
 def embed_to_dict(embed: Any) -> Optional[dict]:
     """Convert discord.Embed to dict for API payload"""
@@ -31,27 +39,22 @@ def embed_to_dict(embed: Any) -> Optional[dict]:
 
 
 async def upload_to_discord(
-    channel_id: str, 
-    file_path: str, 
+    channel_id: str,
+    file_path: str,
     token: str,
     content: str = "",
-    embed: Any = None
+    embed: Any = None,
+    spoiler: bool = False,
 ) -> Optional[dict]:
     """
-    Upload a single file to Discord (async)
-    
-    Args:
-        channel_id: Discord channel ID
-        file_path: Path to the file to upload
-        token: Discord bot token
-        content: Optional message content
-        embed: Optional discord.Embed object
-    
-    Returns:
-        Response JSON or None on failure
+    Upload a single file to Discord (async). If `spoiler` is True, the
+    Discord-recognized SPOILER_ prefix is added to the filename so the
+    attachment renders blurred.
     """
     upload_url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
     filename = os.path.basename(file_path)
+    if spoiler:
+        filename = _spoiler_filename(filename)
     
     headers = {"Authorization": f"Bot {token}"}
     
@@ -98,24 +101,17 @@ async def upload_to_discord(
 
 
 async def upload_multiple_to_discord(
-    channel_id: str, 
-    file_paths: list[str], 
+    channel_id: str,
+    file_paths: list[str],
     token: str,
     content: str = "",
-    embed: Any = None
+    embed: Any = None,
+    spoiler: bool = False,
 ) -> Optional[dict]:
     """
-    Upload multiple files to Discord in a single message (max 10 files, async)
-    
-    Args:
-        channel_id: Discord channel ID
-        file_paths: List of file paths to upload
-        token: Discord bot token
-        content: Optional message content
-        embed: Optional discord.Embed object
-    
-    Returns:
-        Response JSON or None on failure
+    Upload multiple files to Discord in a single message (max 10 files, async).
+    If `spoiler` is True, every uploaded attachment gets the SPOILER_ filename
+    prefix so Discord blurs them.
     """
     if not file_paths:
         return None
@@ -133,8 +129,11 @@ async def upload_multiple_to_discord(
         # Read all files asynchronously
         files_data = []
         for file_path in file_paths:
+            name = os.path.basename(file_path)
+            if spoiler:
+                name = _spoiler_filename(name)
             async with aiofiles.open(file_path, "rb") as f:
-                files_data.append((os.path.basename(file_path), await f.read()))
+                files_data.append((name, await f.read()))
         
         # Build attachments list
         attachments = [

@@ -21,6 +21,13 @@ FACEBOOK_SHARE = "https://www.facebook.com/share/v/1FtYiBbiPb/"
 # Instagram URLs that should produce Cobalt errors (not "file too large")
 INSTAGRAM_UNAVAILABLE = "https://www.instagram.com/reel/DVJ6n17khYN/?igsh=MTN5azBxcWNzbXFuMg%3D%3D"
 INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2NqOTF2dWN3cg%3D%3D"
+# A reel ID that doesn't exist (mistyped) — IG returns the standard "post not
+# found" page; bot should react failure rather than upload anything.
+INSTAGRAM_DELETED = "https://www.instagram.com/reel/DRWyq1k8_-"
+# An age/sensitive-restricted IG photo. Cobalt+cookies fetches it, but IG's
+# anti-bot intermittently rejects authed requests too; the retry layer
+# (3s/10s backoff) should cover the flaky path.
+INSTAGRAM_RESTRICTED_PHOTO = "https://www.instagram.com/p/CNjarYuszEZ/"
 
 
 # ── Warmup ───────────────────────────────────────────────────────────────────
@@ -28,19 +35,19 @@ INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2N
 class TestWarmup:
     """Verify the bot is online before running real tests."""
 
-    @pytest.mark.timeout(300)
+    @pytest.mark.timeout(180)
     async def test_bot_is_online(self, discord):
         """Send a supported URL and wait for the bot to respond.
 
         This doubles as a warmup probe: if the bot isn't deployed yet, we
-        resend every 30s until we get a response or ~5 minutes elapse.
+        resend every 15s until we get a response or ~3 minutes elapse.
         """
         import asyncio
 
         response = None
         for attempt in range(10):
             sent = await discord.send_webhook_message(TWITTER_VIDEO)
-            response = await discord.wait_for_bot_response(sent["id"], timeout=30)
+            response = await discord.wait_for_bot_response(sent["id"], timeout=15)
             if response is not None:
                 break
             await asyncio.sleep(2)
@@ -58,17 +65,17 @@ class TestWarmup:
 class TestHappyPath:
     """Test successful downloads from various providers."""
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(30)
     async def test_twitter_video(self, discord):
         sent = await discord.send_webhook_message(TWITTER_VIDEO)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
         assert response is not None, "No response for Twitter/X link"
         assert response.attachments, "Expected a file attachment for Twitter video"
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(30)
     async def test_instagram_reel(self, discord):
         sent = await discord.send_webhook_message(INSTAGRAM_REEL)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
         assert response is not None, "No response for Instagram reel"
         assert response.attachments, "Expected a file attachment for Instagram reel"
 
@@ -80,19 +87,19 @@ class TestHappyPath:
         assert response is not None, "No response for Reddit link needing compression"
         assert response.attachments, "Expected a compressed file attachment"
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(30)
     async def test_facebook_share_link(self, discord):
         """A Facebook share link should be resolved and downloaded."""
         sent = await discord.send_webhook_message(FACEBOOK_SHARE)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
         assert response is not None, "No response for Facebook share link"
         assert response.attachments, "Expected a file attachment for Facebook share video"
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(30)
     async def test_instagram_multi_image(self, discord):
         """An Instagram post with multiple images (picker)."""
         sent = await discord.send_webhook_message(INSTAGRAM_MULTI_IMAGE)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
         assert response is not None, "No response for Instagram multi-image post"
         assert response.attachments or response.embeds, (
             "Expected attachments or embeds for multi-image post"
@@ -104,7 +111,7 @@ class TestHappyPath:
 class TestErrorHandling:
     """Verify the bot handles errors gracefully (no crash, no misleading messages)."""
 
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(25)
     async def test_unavailable_instagram_reel(self, discord):
         """An Instagram reel that doesn't exist should NOT produce 'file too large'."""
         sent = await discord.send_webhook_message(INSTAGRAM_UNAVAILABLE)
@@ -115,14 +122,47 @@ class TestErrorHandling:
             )
 
     @pytest.mark.timeout(30)
-    async def test_auth_gated_instagram(self, discord):
-        """Auth-gated Instagram content should fail gracefully."""
+    async def test_auth_gated_instagram_with_cookies(self, discord):
+        """An auth-gated Instagram reel should now upload successfully — the
+        cobalt deployment carries IG session cookies, so Cobalt can fetch
+        restricted content. (Pre-cookies this used to fail.)"""
         sent = await discord.send_webhook_message(INSTAGRAM_AUTH_GATED)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=20)
-        if response is not None:
-            assert "file too large" not in response.content.lower(), (
-                "Bug regression: bot should NOT report 'file too large' for auth-gated content"
-            )
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
+        assert response is not None, (
+            "No response for auth-gated reel — Cobalt cookies missing or expired?"
+        )
+        assert response.attachments, (
+            "Auth-gated reel should upload an attachment when cobalt cookies are configured"
+        )
+
+    @pytest.mark.timeout(35)
+    async def test_deleted_instagram_reel_reacts_failure(self, discord):
+        """A reel URL that doesn't exist should produce a failure reaction
+        on the user's message, not an upload."""
+        sent = await discord.send_webhook_message(INSTAGRAM_DELETED)
+        # Wait for the failure reaction first — that's the signal the bot
+        # tried + failed. Then a quick check confirms no upload sneaked in.
+        reactions = await discord.wait_for_reaction(sent["id"], timeout=25)
+        assert reactions, "Bot should react with :thumbot_fail: (or ❌) on failure"
+        response = await discord.wait_for_bot_response(sent["id"], timeout=3)
+        assert response is None or not response.attachments, (
+            "404 URL should not produce an attachment upload"
+        )
+
+    @pytest.mark.timeout(35)
+    async def test_retry_recovers_flaky_instagram_photo(self, discord):
+        """Instagram's anti-bot intermittently rejects even authed requests
+        for restricted content. The cobalt-client retry layer (3s + 10s)
+        should let this URL succeed within the test window."""
+        sent = await discord.send_webhook_message(INSTAGRAM_RESTRICTED_PHOTO)
+        # Allow up to ~13s of cobalt retry backoff plus normal latency.
+        response = await discord.wait_for_bot_response(sent["id"], timeout=30)
+        assert response is not None, (
+            "Even with retry, no response — cobalt cookies may have expired"
+        )
+        assert response.attachments, (
+            "Expected an upload after retry succeeds for the restricted photo"
+        )
 
     @pytest.mark.timeout(25)
     async def test_unsupported_url_ignored(self, discord):
@@ -146,13 +186,13 @@ class TestErrorHandling:
 class TestEdgeCases:
     """Misc edge-case scenarios."""
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(30)
     async def test_message_with_text_and_link(self, discord):
         """A message containing both user text and a supported link."""
         sent = await discord.send_webhook_message(
             f"check this out! {TWITTER_VIDEO}"
         )
-        response = await discord.wait_for_bot_response(sent["id"], timeout=45)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
         assert response is not None, "No response for link embedded in text"
         assert response.attachments, "Expected a file attachment"
 
@@ -162,3 +202,35 @@ class TestEdgeCases:
         sent = await discord.send_webhook_message("hello there, just chatting!")
         response = await discord.wait_for_bot_response(sent["id"], timeout=15)
         assert response is None, "Bot should not respond to plain text"
+
+
+# ── Spoilers ─────────────────────────────────────────────────────────────────
+
+class TestSpoilers:
+    """When the user wraps the URL in Discord's ||...|| spoiler markdown,
+    uploaded attachments should be SPOILER_-prefixed so Discord blurs them."""
+
+    @pytest.mark.timeout(30)
+    async def test_spoiler_marked_url_uploads_with_spoiler_prefix(self, discord):
+        sent = await discord.send_webhook_message(f"||{TWITTER_VIDEO}||")
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
+        assert response is not None, "No response for spoiler-marked URL"
+        assert response.attachments, "Expected an upload for spoiler-marked URL"
+        for att in response.attachments:
+            assert att.get("filename", "").startswith("SPOILER_"), (
+                f"Spoiler-marked URL produced un-spoilered attachment: "
+                f"{att.get('filename')!r}"
+            )
+
+    @pytest.mark.timeout(30)
+    async def test_unmarked_url_does_not_get_spoiler_prefix(self, discord):
+        """Counter-control: a normal URL shouldn't accidentally get SPOILER_."""
+        sent = await discord.send_webhook_message(TWITTER_VIDEO)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
+        assert response is not None, "No response for plain URL"
+        assert response.attachments, "Expected an upload for plain URL"
+        for att in response.attachments:
+            assert not att.get("filename", "").startswith("SPOILER_"), (
+                f"Plain URL got an unexpected SPOILER_ prefix: "
+                f"{att.get('filename')!r}"
+            )

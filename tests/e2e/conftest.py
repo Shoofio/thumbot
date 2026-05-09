@@ -29,6 +29,7 @@ class DiscordMessage:
     content: str
     attachments: list
     embeds: list
+    reactions: list
 
 
 class DiscordE2EClient:
@@ -75,16 +76,55 @@ class DiscordE2EClient:
                     content=m.get("content", ""),
                     attachments=m.get("attachments", []),
                     embeds=m.get("embeds", []),
+                    reactions=m.get("reactions", []),
                 )
                 for m in raw
             ]
+
+    async def get_message(self, message_id: str) -> DiscordMessage:
+        """Fetch a single message by ID (so we can inspect reactions on it)."""
+        session = await self._get_session()
+        url = f"{DISCORD_API}/channels/{self.channel_id}/messages/{message_id}"
+        async with session.get(url) as resp:
+            resp.raise_for_status()
+            m = await resp.json()
+            return DiscordMessage(
+                id=m["id"],
+                author_id=m["author"]["id"],
+                author_bot=m["author"].get("bot", False),
+                content=m.get("content", ""),
+                attachments=m.get("attachments", []),
+                embeds=m.get("embeds", []),
+                reactions=m.get("reactions", []),
+            )
+
+    async def wait_for_reaction(
+        self,
+        message_id: str,
+        *,
+        timeout: float = 30,
+        poll_interval: float = 1.5,
+    ) -> list:
+        """Poll a specific message until it has at least one reaction (or timeout)."""
+        elapsed = 0.0
+        while elapsed < timeout:
+            try:
+                msg = await self.get_message(message_id)
+            except aiohttp.ClientResponseError:
+                # Webhook messages can be deleted by the bot on success; treat as no reaction.
+                return []
+            if msg.reactions:
+                return msg.reactions
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        return []
 
     async def wait_for_bot_response(
         self,
         after_message_id: str,
         *,
         timeout: float = 180,
-        poll_interval: float = 3,
+        poll_interval: float = 1.5,
     ) -> DiscordMessage | None:
         """Poll the channel until a bot message appears after the given message ID."""
         elapsed = 0.0

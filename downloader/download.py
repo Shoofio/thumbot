@@ -78,9 +78,18 @@ class VideoDownloader:
             logger.warning(f"Failed to resolve Facebook share URL, using original: {e}")
             return url
 
-    async def process_url(self, url: str, channel_id: str, embed=None) -> bool:
+    async def process_url(
+        self,
+        url: str,
+        channel_id: str,
+        embed=None,
+        spoiler: bool = False,
+    ) -> bool:
         """
         Process a video URL - download via Cobalt and upload to Discord.
+
+        If `spoiler` is True, uploaded attachments get a SPOILER_ filename
+        prefix so Discord blurs them by default.
 
         Returns True if uploaded, False on any failure.
         """
@@ -111,7 +120,7 @@ class VideoDownloader:
 
                 # Upload to Discord
                 if file_paths:
-                    await self._upload_files(channel_id, file_paths, embed)
+                    await self._upload_files(channel_id, file_paths, embed, spoiler=spoiler)
                     logger.success(f"Uploaded {len(file_paths)} file(s) to Discord")
                     span.add_event("upload_complete", {"files": len(file_paths)})
 
@@ -443,22 +452,24 @@ class VideoDownloader:
                     os.remove(file_path)
                 raise DownloadError(f"Failed to download {video_url}: {e}")
     
-    async def _upload_files(self, channel_id: str, file_paths: list[str], embed=None):
-        """Upload files to Discord with embed"""
-        async with trace_span("discord_upload", {"channel_id": channel_id, "file_count": len(file_paths)}):
+    async def _upload_files(self, channel_id: str, file_paths: list[str], embed=None, spoiler: bool = False):
+        """Upload files to Discord with embed (spoiler-prefixes the filenames if asked)."""
+        async with trace_span("discord_upload", {"channel_id": channel_id, "file_count": len(file_paths), "spoiler": spoiler}):
             if len(file_paths) == 1:
                 await upload_to_discord(
-                    channel_id, 
-                    file_paths[0], 
+                    channel_id,
+                    file_paths[0],
                     self.config.discord_token,
-                    embed=embed
+                    embed=embed,
+                    spoiler=spoiler,
                 )
             else:
                 await upload_multiple_to_discord(
-                    channel_id, 
-                    file_paths, 
+                    channel_id,
+                    file_paths,
                     self.config.discord_token,
-                    embed=embed
+                    embed=embed,
+                    spoiler=spoiler,
                 )
     
     async def _cleanup_files(self, file_paths: list[str]):

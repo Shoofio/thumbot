@@ -3,4 +3,6 @@
 
 pytest
 pytest-asyncio
+pytest-timeout
+pytest-rerunfailures
 aioresponses

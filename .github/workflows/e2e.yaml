@@ -115,14 +115,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: pip install aiohttp pytest pytest-asyncio pytest-timeout
+        run: pip install aiohttp pytest pytest-asyncio pytest-timeout pytest-rerunfailures
 
       - name: Run E2E tests
         env:
           DISCORD_E2E_BOT_TOKEN: ${{ secrets.DISCORD_E2E_BOT_TOKEN }}
           DISCORD_E2E_WEBHOOK_URL: ${{ secrets.DISCORD_E2E_WEBHOOK_URL }}
           DISCORD_E2E_CHANNEL_ID: ${{ secrets.DISCORD_E2E_CHANNEL_ID }}
-        run: pytest tests/e2e/ -v --tb=short --confcutdir=tests/e2e
+        # Reruns soak up flake from upstream (Discord, IG anti-bot, Cobalt rate
+        # limits). 10s delay between attempts gives IG's anti-bot window time
+        # to roll over.
+        run: pytest tests/e2e/ -v --tb=short --confcutdir=tests/e2e --reruns 2 --reruns-delay 10
 
       - name: Report results
         if: always()
