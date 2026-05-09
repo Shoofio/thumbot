@@ -19,6 +19,21 @@ from thumbot.downloader.exceptions import FileTooLargeError, CobaltError, Downlo
 logger = get_logger("download")
 
 
+# Cobalt error codes where retrying at lower qualities won't help.
+# Bail immediately and surface the real reason instead of letting fallback
+# masking errors win.
+TERMINAL_COBALT_CODES = {
+    "error.api.fetch.empty",
+    "error.api.fetch.fail",
+    "error.api.content.post.private",
+    "error.api.content.post.unavailable",
+    "error.api.content.video.unavailable",
+    "error.api.link.unsupported",
+    "error.api.link.invalid",
+    "error.api.service.disabled",
+}
+
+
 class VideoDownloader:
     """Handles video downloads via Cobalt and uploads to Discord (async)"""
     
@@ -65,18 +80,12 @@ class VideoDownloader:
 
     async def process_url(self, url: str, channel_id: str, embed=None) -> bool:
         """
-        Process a video URL - download via Cobalt and upload to Discord
-        
-        Args:
-            url: Video URL to process
-            channel_id: Discord channel ID to upload to
-            embed: Optional discord.Embed to include with the upload
-        
-        Returns:
-            True if successful, False otherwise
+        Process a video URL - download via Cobalt and upload to Discord.
+
+        Returns True if uploaded, False on any failure.
         """
         file_paths = []
-        
+
         async with trace_span("process_url", {"url": url, "channel_id": channel_id}) as span:
             try:
                 logger.info(f"Processing video request: {url}")
@@ -90,39 +99,39 @@ class VideoDownloader:
                 # Get video with quality fallback
                 with MetricsContext("download"):
                     result = await self._download_with_quality_fallback(url)
-                    
+
                     if result["type"] == "single":
                         file_paths = [result["file_path"]]
                     elif result["type"] == "picker":
                         file_paths = result["file_paths"]
                     else:
                         raise CobaltError(f"Unknown result type: {result.get('type')}")
-                
+
                 span.set_attribute("file_count", len(file_paths))
-                
+
                 # Upload to Discord
                 if file_paths:
                     await self._upload_files(channel_id, file_paths, embed)
                     logger.success(f"Uploaded {len(file_paths)} file(s) to Discord")
                     span.add_event("upload_complete", {"files": len(file_paths)})
-                
+
                 return True
-                
+
             except FileTooLargeError as e:
                 logger.error(f"File too large (compression failed): {e}")
                 span.set_attribute("error.type", "file_too_large")
                 return False
-                
+
             except CobaltError as e:
                 logger.error(f"Cobalt error: {e}")
                 span.set_attribute("error.type", "cobalt_error")
                 return False
-                
+
             except DownloadError as e:
                 logger.error(f"Download error: {e}")
                 span.set_attribute("error.type", "download_error")
                 return False
-                
+
             except Exception as e:
                 logger.error(f"Unexpected error processing {url}: {e}")
                 span.set_attribute("error.type", "unexpected")
@@ -220,6 +229,12 @@ class VideoDownloader:
                         # If no files fit, continue to compression
                     
                 except CobaltError as e:
+                    # Some Cobalt errors won't get better at lower qualities
+                    # (post is gone / blocked / unsupported). Bail immediately
+                    # so the real first error wins instead of being masked by
+                    # the Nth fallback attempt.
+                    if str(e) in TERMINAL_COBALT_CODES:
+                        raise
                     last_cobalt_error = e
                     logger.debug(f"Quality {quality.value} failed: {e}")
                     continue

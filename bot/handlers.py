@@ -21,6 +21,11 @@ URL_PATTERN = re.compile(r'(https?://[^\s\)]+)', re.IGNORECASE)
 # Markdown link pattern: [name](url)
 MARKDOWN_LINK_PATTERN = re.compile(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)', re.IGNORECASE)
 
+# Generic "the bot tried and failed" mark — the only failure reaction.
+# Looked up as a custom server emoji by name, with ❌ as last-ditch fallback.
+GENERIC_FAILURE_EMOJI_NAME = "thumbot_fail"
+GENERIC_FAILURE_FALLBACK = "❌"
+
 
 @dataclass
 class DownloadTask:
@@ -111,16 +116,16 @@ class MessageHandler:
                         user_id=task.user_id,
                         user_text=task.user_text
                     )
-                    
+
                     success = await self.downloader.process_url(
                         url=task.url,
                         channel_id=task.channel_id,
                         embed=embed
                     )
-                    
+
                     if success:
                         logger.debug(f"Worker {worker_id} completed: {task.provider}")
-                        
+
                         # Delete original message only after successful upload
                         if task.original_message:
                             try:
@@ -134,6 +139,7 @@ class MessageHandler:
                                 logger.error(f"Failed to delete original message: {e}")
                     else:
                         logger.warning(f"Worker {worker_id} failed: {task.provider}")
+                        await self._react_failure(task.original_message)
                         
                 except Exception as e:
                     logger.error(f"Worker {worker_id} error processing {task.url}: {e}")
@@ -260,3 +266,43 @@ class MessageHandler:
     def queue_size(self) -> int:
         """Get current queue size"""
         return self._task_queue.qsize()
+
+    async def _react_failure(self, message: Optional[discord.Message]):
+        """
+        React :thumbot_fail: on the user's original message so failure is
+        visible. Clears the bot's prior reactions first so re-attempts
+        don't pile up stale marks.
+        """
+        if not message:
+            return
+        await self._clear_own_reactions(message)
+        await self._safe_react(message, self._pick_generic_emoji(message.guild))
+
+    @staticmethod
+    async def _clear_own_reactions(message: discord.Message):
+        """Remove any reactions this bot previously added to the message."""
+        me = message.guild.me if message.guild else None
+        if me is None:
+            return
+        for reaction in list(message.reactions):
+            if getattr(reaction, "me", False):
+                try:
+                    await message.remove_reaction(reaction.emoji, me)
+                except Exception as e:
+                    logger.debug(f"Couldn't remove own reaction {reaction.emoji!r}: {e}")
+
+    @staticmethod
+    async def _safe_react(message: discord.Message, emoji):
+        try:
+            await message.add_reaction(emoji)
+        except discord.Forbidden:
+            logger.debug("No Add Reactions permission in this channel")
+        except Exception as e:
+            logger.debug(f"Failed to add reaction {emoji!r}: {e}")
+
+    def _pick_generic_emoji(self, guild: Optional[discord.Guild]):
+        if guild:
+            emoji = discord.utils.get(guild.emojis, name=GENERIC_FAILURE_EMOJI_NAME)
+            if emoji is not None:
+                return emoji
+        return GENERIC_FAILURE_FALLBACK
