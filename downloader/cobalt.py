@@ -2,6 +2,7 @@
 Cobalt API client for video downloads (async) with quality fallback
 """
 import aiohttp
+import asyncio
 import time
 from typing import Any, Optional
 
@@ -11,6 +12,21 @@ from thumbot.utils.metrics import track_cobalt_request
 from thumbot.downloader.exceptions import CobaltError
 
 logger = get_logger("cobalt")
+
+
+# Cobalt error codes worth retrying. error.api.fetch.empty is the IG anti-bot
+# rejection — even with auth cookies, IG stonewalls a fraction of authenticated
+# requests, but the same URL almost always succeeds on a quick retry.
+# Other terminal codes (post.private, link.unsupported, content.video.unavailable
+# etc.) won't get better and are filtered out one layer up in download.py.
+RETRYABLE_COBALT_CODES = {
+    "error.api.fetch.empty",
+}
+
+# Backoff schedule between attempts. len = number of retries (initial attempt
+# is implicit). 3s + 10s = ≤13s added latency in the worst case before giving
+# up. Long enough to let IG's anti-bot window roll over.
+_RETRY_BACKOFF_SECONDS = (3.0, 10.0)
 
 
 class CobaltClient:
@@ -40,52 +56,69 @@ class CobaltClient:
             await self._session.close()
     
     async def download_video(
-        self, 
-        url: str, 
+        self,
+        url: str,
         quality: Optional[VideoQuality] = None
     ) -> dict[str, Any]:
         """
-        Request video download from Cobalt API
-        
-        Args:
-            url: Video URL to download
-            quality: Video quality to request (None for default/max)
-        
-        Returns:
-            Dict containing the response from Cobalt API
+        Request video download from Cobalt API.
+
+        Retries automatically on transient upstream errors (notably
+        error.api.fetch.empty, which Instagram throws sporadically even
+        on cookie-authenticated requests).
         """
+        last_err: Optional[CobaltError] = None
+        for attempt, delay in enumerate((0.0, *_RETRY_BACKOFF_SECONDS)):
+            if delay:
+                logger.info(f"Retrying Cobalt request in {delay}s after {last_err} (attempt {attempt + 1})")
+                await asyncio.sleep(delay)
+            try:
+                return await self._download_video_once(url, quality)
+            except CobaltError as e:
+                if str(e) not in RETRYABLE_COBALT_CODES:
+                    raise
+                last_err = e
+        # Exhausted retries — surface the last transient error as-is.
+        raise last_err  # type: ignore[misc]
+
+    async def _download_video_once(
+        self,
+        url: str,
+        quality: Optional[VideoQuality] = None
+    ) -> dict[str, Any]:
+        """One attempt at a Cobalt POST. Caller handles retry policy."""
         payload = {"url": url}
-        
+
         # Add quality parameter if specified
         if quality and quality != VideoQuality.MAX:
             payload["videoQuality"] = quality.value
-        
+
         session = await self._get_session()
         start_time = time.time()
-        
+
         try:
             async with session.post(self.base_url, json=payload) as response:
                 response_time = time.time() - start_time
-                
+
                 if response.status == 400:
                     body = await response.json() or {}
                     error_code = body.get("error", {}).get("code", "unknown") if isinstance(body.get("error"), dict) else body.get("error", "unknown")
                     track_cobalt_request("quality_unavailable", response_time)
                     raise CobaltError(f"{error_code}")
-                
+
                 response.raise_for_status()
                 result = await response.json()
-                
+
                 if result.get("status") == "error":
                     error_code = result.get("error", {}).get("code", "unknown") if isinstance(result.get("error"), dict) else result.get("error", "unknown")
                     track_cobalt_request("error", response_time)
                     raise CobaltError(f"{error_code}")
-                
+
                 track_cobalt_request("success", response_time)
                 quality_str = quality.value if quality else "max"
                 logger.debug(f"Cobalt response: {result.get('status')} @ {quality_str}")
                 return result
-            
+
         except aiohttp.ClientError as e:
             track_cobalt_request("error", time.time() - start_time)
             raise CobaltError(f"Cobalt request failed: {e}")
