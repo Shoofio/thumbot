@@ -58,7 +58,7 @@ class CobaltClient:
         
         # Add quality parameter if specified
         if quality and quality != VideoQuality.MAX:
-            payload["vQuality"] = quality.value
+            payload["videoQuality"] = quality.value
         
         session = await self._get_session()
         start_time = time.time()
