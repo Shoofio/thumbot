@@ -20,6 +20,11 @@ logger = get_logger("handlers")
 URL_PATTERN = re.compile(r'(https?://[^\s\)]+)', re.IGNORECASE)
 # Markdown link pattern: [name](url)
 MARKDOWN_LINK_PATTERN = re.compile(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)', re.IGNORECASE)
+# Discord spoiler-wrapped URL: ||...url...||
+# (No internal | so we don't match across separate spoiler spans.)
+SPOILER_URL_PATTERN = re.compile(
+    r'\|\|[^|]*?(https?://[^\s|]+)[^|]*?\|\|', re.IGNORECASE
+)
 
 # Generic "the bot tried and failed" mark — the only failure reaction.
 # Looked up as a custom server emoji by name, with ❌ as last-ditch fallback.
@@ -39,6 +44,7 @@ class DownloadTask:
     user_id: str
     user_text: Optional[str] = None  # Text with 🔗 link already formatted in position
     original_message: Optional[discord.Message] = None  # For deletion after success
+    spoiler: bool = False  # If user wrapped URL in ||...||, mark uploads as spoiler
 
 
 class MessageHandler:
@@ -120,7 +126,8 @@ class MessageHandler:
                     success = await self.downloader.process_url(
                         url=task.url,
                         channel_id=task.channel_id,
-                        embed=embed
+                        embed=embed,
+                        spoiler=task.spoiler,
                     )
 
                     if success:
@@ -165,8 +172,8 @@ class MessageHandler:
             if not (self.config.e2e_channel_id and message.channel.id == self.config.e2e_channel_id):
                 return
         
-        # Extract URL from message
-        url = self._extract_url(message.content)
+        # Extract URL from message (and whether it was spoiler-wrapped)
+        url, spoiler = self._extract_url(message.content)
         has_link = url is not None
         
         # Track metrics
@@ -197,7 +204,8 @@ class MessageHandler:
             avatar_url=str(message.author.display_avatar.url),
             user_id=str(message.author.id),
             user_text=user_text,
-            original_message=message  # Keep reference for deletion after success
+            original_message=message,  # Keep reference for deletion after success
+            spoiler=spoiler,
         )
         await self._task_queue.put(task)
         
@@ -205,16 +213,29 @@ class MessageHandler:
         if queue_size > 0:
             logger.debug(f"Queue size: {queue_size}")
     
-    def _extract_url(self, content: str) -> Optional[str]:
-        """Extract first URL from message content (handles both raw and markdown links)"""
-        # First check for markdown link format [name](url)
+    def _extract_url(self, content: str) -> tuple[Optional[str], bool]:
+        """
+        Extract the first URL from message content. Returns (url, is_spoiler).
+        is_spoiler is True when the URL is wrapped in Discord ||...|| spoiler
+        markers (whether the URL is raw or inside a markdown link).
+        Handles raw URLs and [name](url) markdown links.
+        """
+        # ||<anything containing a URL>|| → spoiler
+        sp_match = SPOILER_URL_PATTERN.search(content)
+        if sp_match:
+            # Prefer the markdown-link URL if present inside the spoiler span
+            inner = sp_match.group(0)
+            md_inner = MARKDOWN_LINK_PATTERN.search(inner)
+            if md_inner:
+                return md_inner.group(2), True
+            return sp_match.group(1), True
+
         md_match = MARKDOWN_LINK_PATTERN.search(content)
         if md_match:
-            return md_match.group(2)  # Return the URL part
-        
-        # Fall back to raw URL
+            return md_match.group(2), False
+
         match = URL_PATTERN.search(content)
-        return match.group(0) if match else None
+        return (match.group(0) if match else None), False
     
     def _extract_user_text(self, content: str, url: str) -> Optional[str]:
         """Extract user's text, formatting depends on markdown vs raw URL"""
