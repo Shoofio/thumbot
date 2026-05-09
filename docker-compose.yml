@@ -1,7 +1,7 @@
 services:
   # Cobalt server for video downloading
   cobalt:
-    image: ghcr.io/imputnet/cobalt:10
+    image: ghcr.io/imputnet/cobalt:11
     container_name: thumbbot-cobalt
     restart: unless-stopped
     environment:
