@@ -7,7 +7,7 @@ on:
 env:
   IMAGE_NAME: shoofio/thumbot-mono
   GITOPS_REPO: Shoofio/Homelab-Kubernetes-Gitops
-  DEPLOYMENT_PATH: apps/deployments/thumbot/thumbot-mono/deployment.yaml
+  DEPLOYMENT_PATH: apps/thumbot/deployment.yaml
 
 jobs:
   build-and-deploy:
