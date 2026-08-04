@@ -9,6 +9,25 @@ env:
   IMAGE_NAME: shoofio/thumbot-mono
 
 jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Repo dir is the `thumbot` package itself (pytest puts its parent on
+      # sys.path via the top-level __init__.py), so no install step is needed.
+      - name: Run unit tests
+        run: pytest tests/ --ignore=tests/e2e -v --tb=short
+
   build:
     name: Build & Push
     runs-on: ubuntu-latest

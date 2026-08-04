@@ -2,7 +2,6 @@
 Cobalt API client for video downloads (async) with quality fallback
 """
 import aiohttp
-import asyncio
 import time
 from typing import Any, Optional
 
@@ -12,21 +11,6 @@ from thumbot.utils.metrics import track_cobalt_request
 from thumbot.downloader.exceptions import CobaltError
 
 logger = get_logger("cobalt")
-
-
-# Cobalt error codes worth retrying. error.api.fetch.empty is the IG anti-bot
-# rejection — even with auth cookies, IG stonewalls a fraction of authenticated
-# requests, but the same URL almost always succeeds on a quick retry.
-# Other terminal codes (post.private, link.unsupported, content.video.unavailable
-# etc.) won't get better and are filtered out one layer up in download.py.
-RETRYABLE_COBALT_CODES = {
-    "error.api.fetch.empty",
-}
-
-# Backoff schedule between attempts. len = number of retries (initial attempt
-# is implicit). 3s + 10s = ≤13s added latency in the worst case before giving
-# up. Long enough to let IG's anti-bot window roll over.
-_RETRY_BACKOFF_SECONDS = (3.0, 10.0)
 
 
 class CobaltClient:
@@ -60,33 +44,7 @@ class CobaltClient:
         url: str,
         quality: Optional[VideoQuality] = None
     ) -> dict[str, Any]:
-        """
-        Request video download from Cobalt API.
-
-        Retries automatically on transient upstream errors (notably
-        error.api.fetch.empty, which Instagram throws sporadically even
-        on cookie-authenticated requests).
-        """
-        last_err: Optional[CobaltError] = None
-        for attempt, delay in enumerate((0.0, *_RETRY_BACKOFF_SECONDS)):
-            if delay:
-                logger.info(f"Retrying Cobalt request in {delay}s after {last_err} (attempt {attempt + 1})")
-                await asyncio.sleep(delay)
-            try:
-                return await self._download_video_once(url, quality)
-            except CobaltError as e:
-                if str(e) not in RETRYABLE_COBALT_CODES:
-                    raise
-                last_err = e
-        # Exhausted retries — surface the last transient error as-is.
-        raise last_err  # type: ignore[misc]
-
-    async def _download_video_once(
-        self,
-        url: str,
-        quality: Optional[VideoQuality] = None
-    ) -> dict[str, Any]:
-        """One attempt at a Cobalt POST. Caller handles retry policy."""
+        """Request video download from Cobalt API."""
         payload = {"url": url}
 
         # Add quality parameter if specified

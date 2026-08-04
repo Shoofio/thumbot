@@ -4,7 +4,6 @@ os.environ.setdefault("DISCORD_TOKEN", "test-token-not-real")
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-import asyncio
 
 from thumbot.downloader.compress import compress_video, _get_video_duration, _compress_second_pass
 
@@ -43,9 +42,8 @@ class TestGetVideoDuration:
 
 class TestCompressVideo:
 
-    def test_missing_input_file(self):
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(compress_video("/nonexistent/file.mp4", 8.0))
+    async def test_missing_input_file(self):
+        result = await compress_video("/nonexistent/file.mp4", 8.0)
         assert result is None
 
     async def test_zero_duration(self, tmp_path):

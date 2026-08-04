@@ -24,10 +24,14 @@ INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2N
 # A reel ID that doesn't exist (mistyped) — IG returns the standard "post not
 # found" page; bot should react failure rather than upload anything.
 INSTAGRAM_DELETED = "https://www.instagram.com/reel/DRWyq1k8_-"
-# An age/sensitive-restricted IG photo. Cobalt+cookies fetches it, but IG's
-# anti-bot intermittently rejects authed requests too; the retry layer
-# (3s/10s backoff) should cover the flaky path.
-INSTAGRAM_RESTRICTED_PHOTO = "https://www.instagram.com/p/CNjarYuszEZ/"
+# An auth-gated IG photo post (/p/, single image, not publicly embeddable) —
+# the exact shape that used to fail before the Cobalt fork added x-ig-app-id
+# to the mobile-API headers.
+INSTAGRAM_AUTH_GATED_PHOTO = "https://www.instagram.com/p/DbfTo5Vyauo/"
+# Reddit gallery (2 images) and a single i.redd.it image — both need the
+# Cobalt fork's reddit_web cookie + gallery/image extraction.
+REDDIT_GALLERY = "https://www.reddit.com/r/EscapefromTarkov/s/VLja5GqcIt"
+REDDIT_IMAGE = "https://www.reddit.com/r/NuPhy/comments/1v92i8o/nuphy_wh80_caps_lock_led/"
 
 
 # ── Warmup ───────────────────────────────────────────────────────────────────
@@ -105,6 +109,47 @@ class TestHappyPath:
             "Expected attachments or embeds for multi-image post"
         )
 
+    @pytest.mark.timeout(30)
+    async def test_instagram_auth_gated_photo(self, discord):
+        """An auth-gated Instagram photo post (/p/, not a reel). Needs Cobalt's
+        cookie-authenticated mobile-API path — this shape was 0/7 before the
+        x-ig-app-id fork fix."""
+        sent = await discord.send_webhook_message(INSTAGRAM_AUTH_GATED_PHOTO)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
+        assert response is not None, (
+            "No response for auth-gated IG photo — cookie or x-ig-app-id path broken?"
+        )
+        assert response.attachments, (
+            "Expected an image attachment for auth-gated IG photo post"
+        )
+
+    @pytest.mark.timeout(40)
+    async def test_reddit_gallery_uploads_all_images(self, discord):
+        """A Reddit gallery post → Cobalt picker → all images uploaded
+        (PICKER_BEHAVIOR=all). Needs the fork's reddit_web cookie and
+        gallery extraction."""
+        sent = await discord.send_webhook_message(REDDIT_GALLERY)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=35)
+        assert response is not None, (
+            "No response for Reddit gallery — reddit_web cookie expired or gallery path broken?"
+        )
+        assert len(response.attachments) >= 2, (
+            f"Gallery has 2 images but got {len(response.attachments)} attachment(s)"
+        )
+
+    @pytest.mark.timeout(30)
+    async def test_reddit_image(self, discord):
+        """A single i.redd.it image post. Needs the fork's reddit_web cookie
+        and post_hint:image extraction."""
+        sent = await discord.send_webhook_message(REDDIT_IMAGE)
+        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
+        assert response is not None, (
+            "No response for Reddit image — reddit_web cookie expired or image path broken?"
+        )
+        assert response.attachments, (
+            "Expected an image attachment for Reddit image post"
+        )
+
 
 # ── Error-handling tests ─────────────────────────────────────────────────────
 
@@ -149,20 +194,12 @@ class TestErrorHandling:
             "404 URL should not produce an attachment upload"
         )
 
-    @pytest.mark.timeout(35)
-    async def test_retry_recovers_flaky_instagram_photo(self, discord):
-        """Instagram's anti-bot intermittently rejects even authed requests
-        for restricted content. The cobalt-client retry layer (3s + 10s)
-        should let this URL succeed within the test window."""
-        sent = await discord.send_webhook_message(INSTAGRAM_RESTRICTED_PHOTO)
-        # Allow up to ~13s of cobalt retry backoff plus normal latency.
-        response = await discord.wait_for_bot_response(sent["id"], timeout=30)
-        assert response is not None, (
-            "Even with retry, no response — cobalt cookies may have expired"
-        )
-        assert response.attachments, (
-            "Expected an upload after retry succeeds for the restricted photo"
-        )
+    # NOTE: the old restricted-photo case (instagram.com/p/CNjarYuszEZ) was
+    # removed 2026-08-04. The URL rotted: IG's oembed endpoint now 404s
+    # age/sensitive-restricted posts, killing every Cobalt extraction rung
+    # deterministically (verified 4/4 fetch.empty — no version of Cobalt
+    # extracts it today). The cookie-authenticated photo path it nominally
+    # covered is tested by test_instagram_auth_gated_photo.
 
     @pytest.mark.timeout(25)
     async def test_unsupported_url_ignored(self, discord):

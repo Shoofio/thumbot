@@ -11,11 +11,14 @@ __pycache__/
 temp_videos/
 *.tmp
 
-# IDE
+# IDE / agent context
 .vscode/
 .idea/
 .cursor/
 .claude/
+CLAUDE.md
+HANDOFF.md
+cobalt-thumbot-patches.diff
 
 # Grafana
 grafana-dashboards/
