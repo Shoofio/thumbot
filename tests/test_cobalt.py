@@ -97,6 +97,17 @@ class TestDownloadVideo:
                     "https://instagram.com/reel/abc", VideoQuality.UHD_4K
                 )
 
+    async def test_fetch_empty_raises_immediately_no_retry(self, cobalt):
+        """error.api.fetch.empty is deterministic (media-less post), so it must
+        surface after exactly one request — no retry, no backoff."""
+        from yarl import URL
+        body = {"status": "error", "error": {"code": "error.api.fetch.empty"}}
+        with aioresponses() as m:
+            m.post(COBALT_URL + "/", status=400, payload=body)
+            with pytest.raises(CobaltError, match="error.api.fetch.empty"):
+                await cobalt.download_video("https://instagram.com/p/abc")
+            assert len(m.requests[("POST", URL(COBALT_URL + "/"))]) == 1
+
     async def test_error_status_in_json_raises(self, cobalt):
         body = {
             "status": "error",

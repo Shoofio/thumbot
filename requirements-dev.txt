@@ -6,3 +6,6 @@ pytest-asyncio
 pytest-timeout
 pytest-rerunfailures
 aioresponses
+# aioresponses 0.7.9 can't mock aiohttp >= 3.13 (ClientResponse grew a required
+# stream_writer kwarg). Test envs only — prod stays on requirements.txt's range.
+aiohttp<3.13

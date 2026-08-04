@@ -50,35 +50,46 @@ class TestExtractUrl:
     def test_raw_url(self):
         assert self.handler._extract_url(
             "check this https://instagram.com/reel/abc"
-        ) == "https://instagram.com/reel/abc"
+        ) == ("https://instagram.com/reel/abc", False)
 
     def test_markdown_link(self):
         assert self.handler._extract_url(
             "[cool video](https://reddit.com/r/foo/comments/123)"
-        ) == "https://reddit.com/r/foo/comments/123"
+        ) == ("https://reddit.com/r/foo/comments/123", False)
 
     def test_no_url(self):
-        assert self.handler._extract_url("just some text with no link") is None
+        assert self.handler._extract_url("just some text with no link") == (None, False)
 
     def test_multiple_urls_returns_first(self):
-        result = self.handler._extract_url(
+        url, spoiler = self.handler._extract_url(
             "first https://instagram.com/reel/1 second https://reddit.com/2"
         )
-        assert result == "https://instagram.com/reel/1"
+        assert url == "https://instagram.com/reel/1"
+        assert spoiler is False
 
     def test_url_with_query_params(self):
-        result = self.handler._extract_url(
+        url, _ = self.handler._extract_url(
             "https://instagram.com/reel/abc?igsh=MTN5azBx&foo=bar"
         )
-        assert "igsh=MTN5azBx" in result
+        assert "igsh=MTN5azBx" in url
 
     def test_url_in_parentheses_no_trailing_paren(self):
-        result = self.handler._extract_url("(https://x.com/post/123)")
-        assert result == "https://x.com/post/123"
-        assert not result.endswith(")")
+        url, _ = self.handler._extract_url("(https://x.com/post/123)")
+        assert url == "https://x.com/post/123"
+        assert not url.endswith(")")
 
     def test_empty_string(self):
-        assert self.handler._extract_url("") is None
+        assert self.handler._extract_url("") == (None, False)
+
+    def test_spoiler_wrapped_url(self):
+        assert self.handler._extract_url(
+            "||https://instagram.com/reel/abc||"
+        ) == ("https://instagram.com/reel/abc", True)
+
+    def test_spoiler_wrapped_markdown_link(self):
+        assert self.handler._extract_url(
+            "||[nsfw](https://reddit.com/r/foo/comments/123)||"
+        ) == ("https://reddit.com/r/foo/comments/123", True)
 
 
 # ---- _extract_user_text ----
