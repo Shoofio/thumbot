@@ -24,9 +24,6 @@ INSTAGRAM_AUTH_GATED = "https://www.instagram.com/reel/DRWyTq1k8_-/?igsh=MWZqc2N
 # A reel ID that doesn't exist (mistyped) — IG returns the standard "post not
 # found" page; bot should react failure rather than upload anything.
 INSTAGRAM_DELETED = "https://www.instagram.com/reel/DRWyq1k8_-"
-# An age/sensitive-restricted IG photo. Requires the cookie-authenticated
-# mobile-API path in Cobalt (anonymous embed fallback can't see it).
-INSTAGRAM_RESTRICTED_PHOTO = "https://www.instagram.com/p/CNjarYuszEZ/"
 # An auth-gated IG photo post (/p/, single image, not publicly embeddable) —
 # the exact shape that used to fail before the Cobalt fork added x-ig-app-id
 # to the mobile-API headers.
@@ -197,20 +194,12 @@ class TestErrorHandling:
             "404 URL should not produce an attachment upload"
         )
 
-    @pytest.mark.timeout(30)
-    async def test_restricted_instagram_photo_uploads(self, discord):
-        """A restricted IG photo must succeed on the first attempt via the
-        cookie-authenticated mobile-API path — no retry layer exists anymore
-        (the old flakiness was a deterministic missing-header bug, since
-        fixed in the Cobalt fork)."""
-        sent = await discord.send_webhook_message(INSTAGRAM_RESTRICTED_PHOTO)
-        response = await discord.wait_for_bot_response(sent["id"], timeout=25)
-        assert response is not None, (
-            "No response for restricted photo — cobalt cookies may have expired"
-        )
-        assert response.attachments, (
-            "Expected an upload for the restricted photo"
-        )
+    # NOTE: the old restricted-photo case (instagram.com/p/CNjarYuszEZ) was
+    # removed 2026-08-04. The URL rotted: IG's oembed endpoint now 404s
+    # age/sensitive-restricted posts, killing every Cobalt extraction rung
+    # deterministically (verified 4/4 fetch.empty — no version of Cobalt
+    # extracts it today). The cookie-authenticated photo path it nominally
+    # covered is tested by test_instagram_auth_gated_photo.
 
     @pytest.mark.timeout(25)
     async def test_unsupported_url_ignored(self, discord):
